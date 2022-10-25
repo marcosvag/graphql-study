@@ -1,5 +1,5 @@
 import { extendType, intArg, nonNull, objectType, stringArg } from "nexus";
-import { NexusGenObjects } from "../../nexus-typegen";
+import { ensureAuthMutation } from "../utils/auth"
 
 export const Link = objectType({
     name: "Link",
@@ -7,21 +7,16 @@ export const Link = objectType({
         t.nonNull.int("id");
         t.nonNull.string("description");
         t.nonNull.string("url");
+        t.field("postedBy", {
+            type: "User",
+            resolve(parent, args, context) {
+                return context.prisma.link
+                    .findUnique({where: { id: parent.id}})
+                    .postedBy();
+            }
+        });
     },
 });
-
-let links: NexusGenObjects["Link"][] = [
-    {
-        id: 1,
-        url: "www.howtographql.com",
-        description: "Fullstack tutorial for GraphQL",
-    },
-    {
-        id: 2,
-        url: "graphql.org",
-        description: "GraphQL official website",
-    },
-];
 
 export const LinkQuery = extendType({
     type: "Query",
@@ -29,9 +24,9 @@ export const LinkQuery = extendType({
         t.nonNull.list.nonNull.field("feed", {
             type: "Link",
             resolve(parent, args, context, info) {
-                return links
+                return context.prisma.link.findMany();
             }
-        })
+        });
     },
 });
 
@@ -45,20 +40,23 @@ export const LinkMutation = extendType({
                 url: nonNull(stringArg()),
             },
             resolve(parent, args, context) {
-                const { description, url } = args;
+                ensureAuthMutation(context, "post");
 
-                let idCount = links.length + 1;
-                const link = {
-                    id: idCount,
-                    description: description,
-                    url: url,
-                };
-                links.push(link);
-                return link;
+                const { description, url } = args;
+                const { userId } = context;
+
+                const newLink = context.prisma.link.create({
+                    data: {
+                        description,
+                        url,
+                        postedBy: { connect: { id: userId}}
+                    }
+                });
+                return newLink;
             }
-        })
+        });
     },
-})
+});
 
 export const singleLinkQuery = extendType({
     type: "Query",
@@ -69,60 +67,61 @@ export const singleLinkQuery = extendType({
                 id: nonNull(intArg()),
             },
             resolve(parent, args, context, info) {
-                const { id } = args;
+                const link = [context.prisma.link.findUnique({
+                    where: {
+                        id: args.id
+                    },
+                })];
 
-                return links.filter(el => el.id === id);
+                return link;
             }
-        })
+        });
     },
-})
+});
 
-export const singleLinkMutation =  extendType({
+export const singleLinkMutation = extendType({
     type: "Mutation",
     definition(t) {
         t.nonNull.field("updateLink", {
             type: "Link",
             args: {
                 id: nonNull(intArg()),
-                url: stringArg(),
-                description: stringArg(),
+                url: nonNull(stringArg()),
+                description: nonNull(stringArg()),
             },
             resolve(parent, args, context, info) {
-                const { id, url, description} = args;
+                ensureAuthMutation(context, "edit");
 
-                let link = links.filter(link => link.id === id);
+                const updatedLink = context.prisma.link.update({
+                    where: {
+                        id: args.id
+                    },
+                    data: {
+                        description: args.description,
+                        url: args.url,
+                    },
+                });
 
-                if(url) link[0].url = url;
-                if(description) link[0].description = description;
-                
-                console.log(link)
-
-                return link[0]
+                return updatedLink;
             }
         }),
-        t.nonNull.field("deleteLink", {
-            type: "Link",
-            args: {
-                id: nonNull(intArg()),
-            },
-            resolve(parent, args, context, info) {
-                const { id } = args
-                let deletedBaseLink = {
-                     id: id, 
-                     description: "Not found", 
-                     url: "Not found",
-                    };
-                links = links.filter( (link) => {
-                    if(link.id == id) {
-                        deletedBaseLink = link
-                        return false
-                    }else {
-                        return true
-                    }
-                })
-                return deletedBaseLink
-            }
-        })
-        
+            t.nonNull.field("deleteLink", {
+                type: "Link",
+                args: {
+                    id: nonNull(intArg()),
+                },
+                resolve(parent, args, context, info) {
+                    ensureAuthMutation(context, "delete");
+
+                    const deletedLink = context.prisma.link.delete({
+                        where: {
+                            id: args.id
+                        }
+                    });
+
+                    return deletedLink;
+                }
+            })
+
     },
-})
+});

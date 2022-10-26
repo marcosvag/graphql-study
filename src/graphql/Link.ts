@@ -1,20 +1,33 @@
-import { extendType, intArg, nonNull, objectType, stringArg } from "nexus";
+import { arg, extendType, intArg, nonNull, objectType, stringArg } from "nexus";
 import { ensureAuthMutation } from "../utils/auth"
 
 export const Link = objectType({
     name: "Link",
     definition(t) {
-        t.nonNull.int("id");
         t.nonNull.string("description");
+        t.nonNull.int("id");
         t.nonNull.string("url");
-        t.field("postedBy", {
+        t.nonNull.dateTime("createdAt");
+        t.nonNull.field("postedBy", {
             type: "User",
             resolve(parent, args, context) {
                 return context.prisma.link
-                    .findUnique({where: { id: parent.id}})
+                    .findUnique({ where: { id: parent.id } })
                     .postedBy();
             }
         });
+        t.nonNull.list.nonNull.field("voters", {
+            type: "User",
+            resolve(parent, args, context) {
+                return context.prisma.link
+                    .findUnique({
+                        where: {
+                            id: parent.id
+                        }
+                    })
+                    .voters();
+            }
+        })
     },
 });
 
@@ -23,8 +36,26 @@ export const LinkQuery = extendType({
     definition(t) {
         t.nonNull.list.nonNull.field("feed", {
             type: "Link",
+            args: {
+                filter: stringArg(),
+                skip: intArg(),
+                take: intArg(),
+            },
             resolve(parent, args, context, info) {
-                return context.prisma.link.findMany();
+                const where = args.filter ? {
+                    OR: [
+                    { description: { contains: args.filter } },
+                    { url: { contains: args.filter } },
+                    { postedBy: {
+                        name: { contains: args.filter }},
+                    }],
+                }
+                    : {};
+                return context.prisma.link.findMany({ 
+                    where, 
+                    skip: args?.skip as number | undefined,
+                    take: args?.take as number | undefined,
+                });
             }
         });
     },
@@ -49,7 +80,7 @@ export const LinkMutation = extendType({
                     data: {
                         description,
                         url,
-                        postedBy: { connect: { id: userId}}
+                        postedBy: { connect: { id: userId } }
                     }
                 });
                 return newLink;
